@@ -1,4 +1,3 @@
-// React hooks from global React (loaded via CDN)
 var useState=React.useState,useEffect=React.useEffect,useRef=React.useRef,useCallback=React.useCallback,useMemo=React.useMemo;
 
 var MONTHS_S = ["Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"];
@@ -124,7 +123,7 @@ function DonutChart(props) {
         )
       ),
       React.createElement("div",{style:{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none"}},
-        React.createElement("div",{style:{fontSize:10,color:"rgba(255,255,255,0.45)",textTransform:"uppercase",marginBottom:3}},"Saldo netto"),
+        React.createElement("div",{style:{fontSize:10,color:"rgba(255,255,255,0.45)",textTransform:"uppercase",marginBottom:3}},"Bilancio"),
         React.createElement("div",{style:{fontSize:22,fontWeight:800,color:bal>=0?"#06D6A0":"#FF416C",lineHeight:1.1}},fmt(bal)),
         React.createElement("div",{style:{fontSize:10,color:"rgba(255,255,255,0.35)",marginTop:3}},total>0?(Math.round(incR*100)+"% entrate"):"nessun dato")
       )
@@ -173,6 +172,10 @@ function BudgetFlow() {
   var modalRef = useRef();
   var startY = useRef(0);
   var fileRef = useRef();
+  var backupRef = useRef();
+  var [backupMsg, setBackupMsg] = useState("");
+  var [confirmReset, setConfirmReset] = useState(false);
+  var [jsonModal, setJsonModal] = useState(null);
 
   var fmt = useFmt(settings.currency);
   var acA = settings.accentA||"#4361EE";
@@ -319,16 +322,16 @@ function BudgetFlow() {
       var rows = raw.split("\n").map(function(l){return l.trim();}).filter(Boolean);
       if(rows.length<2){setCsvMsg("File vuoto");return;}
       var parseAmt = function(r){return parseFloat(r.replace(/"/g,"").replace(/\u2212/g,"-").replace(/\s/g,"").replace(/\.(?=\d{3})/g,"").replace(",","."));};
-      var parseDate = function(r){
-        if(!r)return new Date().toISOString().split("T")[0];
-        r=r.replace(/"/g,"").trim();
-        var dm=r.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
-        if(dm){var y=parseInt(dm[3]);if(y<100)y+=2000;return y+"-"+dm[2].padStart(2,"0")+"-"+dm[1].padStart(2,"0");}
-        if(/^\d{4}-\d{2}-\d{2}/.test(r))return r.slice(0,10);
-        return new Date().toISOString().split("T")[0];
-      };
+      var parseDate=function(r){
+if(!r)return new Date().toISOString().split("T")[0];
+r=r.replace(/"/g,"").trim();
+var dm=r.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+if(dm){var y=parseInt(dm[3]);if(y<100)y+=2000;return y+"-"+dm[2].padStart(2,"0")+"-"+dm[1].padStart(2,"0");}
+if(/^\d{4}-\d{2}-\d{2}/.test(r))return r.slice(0,10);
+return new Date().toISOString().split("T")[0];
+};
       var headers = rows[0].split(delim).map(function(h){return h.toLowerCase().replace(/"/g,"").trim();});
-      var catMap = {"ristorante":"restaurant","palestra":"sport","carburante":"fuel","abbigliamento":"clothing","farmaci":"health","abbonamenti":"subscriptions","mutuo/affitto":"rent","utenze":"utilities","stipendio":"salary","trasferimenti monetari":"transfer","trasferimenti monetari inviati":"transfer","spesa":"grocery","shopping":"shopping","trasporti":"transport","salute":"health","tasse":"tax","regali":"gift","vacanze":"vacation","bar":"bar","cinema":"cinema","assicurazione":"insurance"};
+      var catMap={"ristorante":"restaurant","palestra":"sport","carburante":"fuel","abbigliamento":"clothing","farmaci":"health","abbonamenti":"subscriptions","mutuo/affitto":"rent","utenze":"utilities","stipendio":"salary","trasferimenti monetari":"transfer","trasferimenti monetari inviati":"transfer"};
       var payMap = {"contanti":"cash","carta di credito":"card","carta credito":"card","carta di debito":"debit","bancomat":"debit","bonifico":"bank","paypal":"paypal","satispay":"satispay","altro":"cash"};
       var iDate=headers.indexOf("data"),iCat=headers.indexOf("categorie"),iMain=headers.indexOf("categoria principale"),iTx=headers.indexOf("transazioni"),iNote=headers.indexOf("nota"),iAmt=headers.indexOf("importo"),iPay=headers.findIndex(function(h){return h.includes("pagamento");}),iAcc=headers.indexOf("conto");
       if(iAmt<0)iAmt=7;if(iDate<0)iDate=2;if(iMain<0)iMain=3;if(iCat<0)iCat=4;if(iTx<0)iTx=5;if(iNote<0)iNote=6;if(iPay<0)iPay=8;if(iAcc<0)iAcc=1;
@@ -359,6 +362,41 @@ function BudgetFlow() {
     e.target.value="";
   }
 
+  function exportBackup() {
+    var data={version:1,exportedAt:new Date().toISOString(),txs:txs,accounts:accounts,settings:settings};
+    var json=JSON.stringify(data,null,2);
+    var filename="budgetflow-"+new Date().toISOString().split("T")[0]+".json";
+    var downloaded=false;
+    // Tentativo download diretto (funziona su Vercel, Chrome, Firefox)
+    try {
+      var blob=new Blob([json],{type:"application/json"});
+      var url=URL.createObjectURL(blob);
+      var a=document.createElement("a");
+      a.href=url;a.download=filename;a.style.display="none";
+      document.body.appendChild(a);a.click();
+      setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},500);
+      downloaded=true;
+    } catch(e){}
+    // Sempre mostra il modal JSON come backup affidabile
+    setJsonModal({json:json,filename:filename,downloaded:downloaded});
+  }
+
+  function importBackup(e) {
+    var file=e.target.files[0];if(!file)return;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      try{
+        var data=JSON.parse(ev.target.result);
+        if(!data.txs||!data.accounts){setBackupMsg("File non valido: mancano txs o accounts");setTimeout(function(){setBackupMsg("");},5000);return;}
+        saveTxs(data.txs);saveAccounts(data.accounts);
+        if(data.settings)saveSett(data.settings);
+        setBackupMsg("✓ "+data.txs.length+" transazioni ripristinate");
+        setTimeout(function(){setBackupMsg("");},6000);
+      }catch(err){setBackupMsg("Errore: file non valido o corrotto");setTimeout(function(){setBackupMsg("");},5000);}
+    };
+    reader.readAsText(file,"UTF-8");e.target.value="";
+  }
+
   function onTouchStart(e) { startY.current=e.touches[0].clientY; setDragY(0); }
   function onTouchMove(e) {
     var dy=e.touches[0].clientY-startY.current;
@@ -372,18 +410,20 @@ function BudgetFlow() {
 
   var activeAccount = accounts.find(function(a){return a.id===filterAcc;})||null;
   var inp = {width:"100%",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,color:"#fff",padding:"11px 13px",fontSize:14,outline:"none",boxSizing:"border-box"};
+  var navBtn = {background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",borderRadius:11,padding:"7px 14px",cursor:"pointer",fontSize:18};
+  var hBtn = {background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",borderRadius:9,padding:"6px 12px",cursor:"pointer",fontSize:16};
   var finp = {width:"100%",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:9,color:"#fff",padding:"9px 11px",outline:"none",boxSizing:"border-box"};
   var lbl = {fontSize:11,color:"rgba(255,255,255,0.45)",marginBottom:5,display:"block"};
   var flbl = {fontSize:9,color:"rgba(255,255,255,0.4)",marginBottom:4};
-  var sHdr = {fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:1.2,marginBottom:12};
-  var sHdr10 = {fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:1.2,marginBottom:10};
+  var sHdr = {fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",marginBottom:12};
+  var sHdr10 = {fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",marginBottom:10};
   var tUp9 = {fontSize:9,color:"rgba(255,255,255,0.4)",textTransform:"uppercase",marginBottom:3};
   var outBtn = {padding:"8px 13px",borderRadius:10,border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",fontSize:12,fontWeight:600,background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)"};
   var statBox = {background:"rgba(255,255,255,0.06)",borderRadius:10,padding:"9px 7px",textAlign:"center"};
   var pnlBox = function(p){return {background:p>=0||p===null?"rgba(6,214,160,0.1)":"rgba(255,65,108,0.1)",border:"1px solid "+(p>=0||p===null?"rgba(6,214,160,0.2)":"rgba(255,65,108,0.2)"),borderRadius:10,padding:"9px 7px",textAlign:"center"};};
   var accBox = function(a){return {background:a.color+"18",border:"1px solid "+a.color+"33",borderRadius:10,padding:"9px 7px",textAlign:"center"};};
-  var sHdr14 = {fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:1.2,marginBottom:14};
-  var tUp10 = {fontSize:10,color:"rgba(255,255,255,0.38)",marginBottom:5,textTransform:"uppercase",letterSpacing:1};
+  var sHdr14 = {fontSize:12,fontWeight:700,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",marginBottom:14};
+  var tUp10 = {fontSize:10,color:"rgba(255,255,255,0.38)",marginBottom:5,textTransform:"uppercase"};
   var fbtn = {flex:1,padding:"10px",borderRadius:10,border:"none",cursor:"pointer",fontSize:13,fontWeight:800};
   var fcnl = {padding:"10px 14px",borderRadius:10,border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",fontSize:13,background:"transparent",color:"rgba(255,255,255,0.5)"};
   var frow = {display:"flex",gap:8,marginBottom:8};
@@ -409,15 +449,15 @@ function BudgetFlow() {
       <div style={{maxWidth:500,margin:"0 auto",position:"relative",zIndex:1}}>
 
             <div style={{padding:"18px 20px 0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <button onClick={function(){setViewMonth(function(d){return new Date(d.getFullYear(),d.getMonth()-1);});}} style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",borderRadius:11,padding:"7px 14px",cursor:"pointer",fontSize:18}}>&#8249;</button>
+          <button onClick={function(){setViewMonth(function(d){return new Date(d.getFullYear(),d.getMonth()-1);});}} style={navBtn}>&#8249;</button>
           <div style={{textAlign:"center",flex:1}}>
             {activeAccount
-              ? <div style={{fontSize:11,color:activeAccount.color,fontWeight:600,letterSpacing:1,marginBottom:2}}>{activeAccount.icon} {activeAccount.name}</div>
-              : <div style={{fontSize:11,color:"rgba(255,255,255,0.35)",letterSpacing:1,marginBottom:2,fontWeight:600}}>TUTTI I CONTI</div>
+              ? <div style={{fontSize:11,color:activeAccount.color,fontWeight:600,marginBottom:2}}>{activeAccount.icon} {activeAccount.name}</div>
+              : <div style={{fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:2,fontWeight:600}}>TUTTI I CONTI</div>
             }
             <div style={{fontSize:22,fontWeight:800,letterSpacing:-0.5,color:"#fff"}}>{MONTHS_F[curMonth]} {curYear}</div>
           </div>
-          <button onClick={function(){setViewMonth(function(d){return new Date(d.getFullYear(),d.getMonth()+1);});}} style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",borderRadius:11,padding:"7px 14px",cursor:"pointer",fontSize:18}}>&#8250;</button>
+          <button onClick={function(){setViewMonth(function(d){return new Date(d.getFullYear(),d.getMonth()+1);});}} style={navBtn}>&#8250;</button>
         </div>
 
 
@@ -832,17 +872,13 @@ function BudgetFlow() {
                   <div style={{fontSize:14,fontWeight:700}}>Nuovo Conto</div>
                   <button onClick={function(){setShowNewAcc(false);}} style={{background:"none",border:"none",color:"rgba(255,255,255,0.5)",cursor:"pointer",fontSize:22,lineHeight:1}}>×</button>
                 </div>
-                <label style={lbl}>Nome</label>
                 <input value={accForm.name} onChange={function(e){setAccForm(function(f){return Object.assign({},f,{name:e.target.value});});}} placeholder="es. Conto BancaX" style={{...inp,marginBottom:12}}/>
-                <label style={lbl}>Saldo iniziale</label>
                 <input type="number" value={accForm.balance} onChange={function(e){setAccForm(function(f){return Object.assign({},f,{balance:e.target.value});});}} placeholder="0.00" style={{...inp,marginBottom:12}}/>
-                <label style={lbl}>Icona</label>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
                   {["🏦","🏛️","💳","👜","💼","🪙","💰","🏠","🛡️","📈","🎯","💎","🏧","💹"].map(function(ic){
                     return <button key={ic} onClick={function(){setAccForm(function(f){return Object.assign({},f,{icon:ic});});}} style={{width:36,height:36,borderRadius:10,fontSize:18,cursor:"pointer",border:"2px solid "+(accForm.icon===ic?"#fff":"rgba(255,255,255,0.15)"),background:"rgba(255,255,255,0.07)"}}>{ic}</button>;
                   })}
                 </div>
-                <label style={lbl}>Colore</label>
                 <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
                   {["#4361EE","#06D6A0","#F9844A","#F72585","#FFD60A","#8B5CF6","#FB7185","#43AA8B","#4CC9F0","#E63946"].map(function(c){
                     return <button key={c} onClick={function(){setAccForm(function(f){return Object.assign({},f,{color:c});});}} style={{width:28,height:28,borderRadius:8,background:c,cursor:"pointer",border:"3px solid "+(accForm.color===c?"#fff":"transparent")}}></button>;
@@ -923,7 +959,7 @@ function BudgetFlow() {
                 var color=COLORS[cat]||"#aaa";
                 return (
                   <div key={cat} style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
-                    <div style={{width:34,height:34,borderRadius:10,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>{catIcons[cat]||"💸"}</div>
+                    <div style={{width:32,height:32,borderRadius:9,background:color+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>{catIcons[cat]||"💸"}</div>
                     <div style={{flex:1}}>
                       <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4}}><span style={{textTransform:"capitalize"}}>{cat}</span><span style={{fontWeight:700,color:color}}>{fmt(amt)}</span></div>
                       <div style={{height:4,borderRadius:2,background:"rgba(255,255,255,0.07)"}}><div style={{height:"100%",borderRadius:2,background:color,width:pct+"%"}}/></div>
@@ -939,9 +975,9 @@ function BudgetFlow() {
         {tab==="history"&&(
           <div style={{padding:"0 20px",paddingBottom:80}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-              <button onClick={function(){setHistoryYear(function(y){return y>2015?y-1:y;});}} style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",borderRadius:9,padding:"6px 12px",cursor:"pointer",fontSize:16}}>&#8249;</button>
+              <button onClick={function(){setHistoryYear(function(y){return y>2015?y-1:y;});}} style={hBtn}>&#8249;</button>
               <div style={{fontSize:20,fontWeight:800,color:acA}}>{historyYear}</div>
-              <button onClick={function(){setHistoryYear(function(y){return y<new Date().getFullYear()?y+1:y;});}} style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",color:"#fff",borderRadius:9,padding:"6px 12px",cursor:"pointer",fontSize:16}}>&#8250;</button>
+              <button onClick={function(){setHistoryYear(function(y){return y<new Date().getFullYear()?y+1:y;});}} style={hBtn}>&#8250;</button>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               {getMonthsForYear(historyYear).map(function(item){
@@ -974,10 +1010,10 @@ function BudgetFlow() {
                           })}
                         </div>
                         <div style={fgrid}>
-                          <input type="number" placeholder="Importo" value={editingMonth.amount} onChange={function(e){setEditingMonth(function(h){return Object.assign({},h,{amount:e.target.value});});}} style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:9,color:"#fff",padding:"8px 10px",fontSize:15,fontWeight:700,outline:"none",boxSizing:"border-box"}}/>
-                          <input type="date" value={editingMonth.date} onChange={function(e){setEditingMonth(function(h){return Object.assign({},h,{date:e.target.value});});}} style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:9,color:"#fff",padding:"8px 10px",fontSize:12,outline:"none",boxSizing:"border-box",colorScheme:"dark"}}/>
+                          <input type="number" placeholder="Importo" value={editingMonth.amount} onChange={function(e){setEditingMonth(function(h){return Object.assign({},h,{amount:e.target.value});});}} style={{...finp,fontSize:15,fontWeight:700}}/>
+                          <input type="date" value={editingMonth.date} onChange={function(e){setEditingMonth(function(h){return Object.assign({},h,{date:e.target.value});});}} style={{...finp,fontSize:12}}/>
                         </div>
-                        <input type="text" placeholder="Descrizione" value={editingMonth.description} onChange={function(e){setEditingMonth(function(h){return Object.assign({},h,{description:e.target.value});});}} style={{width:"100%",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:9,color:"#fff",padding:"8px 10px",fontSize:13,outline:"none",boxSizing:"border-box",marginBottom:8}}/>
+                        <input type="text" placeholder="Descrizione" value={editingMonth.description} onChange={function(e){setEditingMonth(function(h){return Object.assign({},h,{description:e.target.value});});}} style={{...finp,fontSize:13,marginBottom:8}}/>
                         <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>
                           {accounts.map(function(a){var active=editingMonth.account===a.id;return <button key={a.id} onClick={function(){setEditingMonth(function(h){return Object.assign({},h,{account:a.id});});}} style={{padding:"5px 10px",borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:600,border:"1px solid "+(active?a.color:"rgba(255,255,255,0.1)"),background:active?a.color+"22":"transparent",color:active?a.color:"rgba(255,255,255,0.4)"}}>{a.icon} {a.name}</button>;})}
                         </div>
@@ -1047,8 +1083,8 @@ function BudgetFlow() {
             </div>
 
             <div style={{...cs,marginBottom:14}}>
-              <div style={sHdr}>Dati</div>
-              <div style={{display:"flex",gap:8}}>
+              <div style={sHdr}>Backup & Dati</div>
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
                 <div style={{flex:1,padding:"10px",borderRadius:10,background:"rgba(6,214,160,0.08)",border:"1px solid rgba(6,214,160,0.2)",textAlign:"center"}}>
                   <div style={{fontSize:20,fontWeight:800,color:"#06D6A0"}}>{txs.length}</div>
                   <div style={{fontSize:11,color:"rgba(255,255,255,0.4)"}}>transazioni</div>
@@ -1057,8 +1093,22 @@ function BudgetFlow() {
                   <div style={{fontSize:20,fontWeight:800,color:acA}}>{accounts.length}</div>
                   <div style={{fontSize:11,color:"rgba(255,255,255,0.4)"}}>conti</div>
                 </div>
-                <button onClick={function(){if(window.confirm("Cancellare tutti i dati?")){saveTxs([]);saveAccounts(DEFAULT_ACCOUNTS);}}} style={{flex:1,padding:"10px",borderRadius:10,border:"1px solid rgba(255,65,108,0.25)",background:"rgba(255,65,108,0.08)",cursor:"pointer",color:"#FF416C",fontSize:11,fontWeight:600}}>Reset</button>
               </div>
+              <div style={{display:"flex",gap:8,marginBottom:8}}>
+                <button onClick={exportBackup} style={{flex:1,padding:"11px",borderRadius:12,border:"none",cursor:"pointer",background:"linear-gradient(135deg,"+acA+","+acB+")",color:"#fff",fontSize:13,fontWeight:700}}>⬇ Esporta</button>
+                <button onClick={function(){backupRef.current.click();}} style={{flex:1,padding:"11px",borderRadius:12,border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.8)",fontSize:13,fontWeight:700}}>⬆ Importa</button>
+              </div>
+              <input type="file" accept=".json" ref={backupRef} style={{display:"none"}} onChange={importBackup}/>
+
+              {backupMsg&&<div style={{padding:"9px 12px",borderRadius:10,background:backupMsg[0]==="E"||backupMsg[0]==="F"?"rgba(255,65,108,0.12)":"rgba(6,214,160,0.1)",border:"1px solid "+(backupMsg[0]==="E"||backupMsg[0]==="F"?"rgba(255,65,108,0.3)":"rgba(6,214,160,0.25)"),color:backupMsg[0]==="E"||backupMsg[0]==="F"?"#FF416C":"#06D6A0",fontSize:12,fontWeight:600,marginBottom:8}}>{backupMsg}</div>}
+              {confirmReset?(
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={function(){saveTxs([]);saveAccounts(DEFAULT_ACCOUNTS);saveSett({bgColor:"#0d0d1a",accentA:"#4361EE",accentB:"#7209B7",cardOpacity:5,currency:"EUR"});setConfirmReset(false);setBackupMsg("Reset completato");setTimeout(function(){setBackupMsg("");},3000);}} style={{...fbtn,background:"#FF416C",color:"#fff"}}>Sì, cancella tutto</button>
+                  <button onClick={function(){setConfirmReset(false);}} style={fcnl}>Annulla</button>
+                </div>
+              ):(
+                <button onClick={function(){setConfirmReset(true);}} style={{width:"100%",padding:"10px",borderRadius:10,border:"1px solid rgba(255,65,108,0.25)",background:"rgba(255,65,108,0.06)",cursor:"pointer",color:"#FF416C",fontSize:12,fontWeight:600}}>🗑 Reset tutti i dati</button>
+              )}
             </div>
           </div>
         )}
@@ -1080,7 +1130,7 @@ function BudgetFlow() {
               <label style={lbl}>Descrizione</label>
               <input type="text" placeholder="A cosa serve?" value={form.description} onChange={function(e){setForm(function(f){return Object.assign({},f,{description:e.target.value});});}} style={{...inp,marginBottom:14}}/>
               <label style={lbl}>Data</label>
-              <input type="date" value={form.date} onChange={function(e){setForm(function(f){return Object.assign({},f,{date:e.target.value});});}} style={{...inp,colorScheme:"dark",marginBottom:14}}/>
+              <input type="date" value={form.date} onChange={function(e){setForm(function(f){return Object.assign({},f,{date:e.target.value});});}} style={{...inp,marginBottom:14}}/>
               <label style={lbl}>Conto</label>
               <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
                 {accounts.map(function(a){
@@ -1089,8 +1139,7 @@ function BudgetFlow() {
               </div>
               {txType==="transfer"&&(
                 <div style={{marginBottom:14}}>
-                  <label style={lbl}>Trasferisci a</label>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                     {accounts.filter(function(a){return a.id!==form.account;}).map(function(a){
                       return <button key={a.id} onClick={function(){setForm(function(f){return Object.assign({},f,{toAccount:a.id});});}} style={{padding:"7px 12px",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:600,border:"1px solid "+(form.toAccount===a.id?a.color:"rgba(255,255,255,0.12)"),background:form.toAccount===a.id?a.color+"22":"transparent",color:form.toAccount===a.id?a.color:"rgba(255,255,255,0.45)"}}>{a.icon} {a.name}</button>;
                     })}
@@ -1132,7 +1181,7 @@ function BudgetFlow() {
                 })}
               </div>
               <button onClick={addTx} style={{width:"100%",padding:"15px",borderRadius:16,border:"none",cursor:"pointer",fontSize:15,fontWeight:800,color:"#fff",background:txType==="income"?"linear-gradient(135deg,#06D6A0,#00a07a)":txType==="transfer"?"linear-gradient(135deg,"+acA+","+acB+")":"linear-gradient(135deg,#FF416C,#c0003a)",boxShadow:txType==="income"?"0 8px 24px rgba(6,214,160,0.35)":txType==="transfer"?"0 8px 24px "+acA+"55":"0 8px 24px rgba(255,65,108,0.35)"}}>
-                {txType==="income"?"Aggiungi Entrata":txType==="transfer"?"Conferma Trasferimento":"Aggiungi Uscita"}
+                {txType==="income"?"+ Entrata":txType==="transfer"?"Trasferimento":"+ Uscita"}
               </button>
             </div>
           </div>
@@ -1140,7 +1189,7 @@ function BudgetFlow() {
 
         <div onClick={function(){setTab(function(t){return t==="settings"?"dashboard":"settings";});}} style={{position:"fixed",bottom:0,left:0,right:0,zIndex:50,height:34,cursor:"pointer",background:tab==="settings"?"linear-gradient(90deg,"+acA+"22,"+acB+"22)":"rgba(255,255,255,0.05)",backdropFilter:"blur(12px)",borderTop:"1px solid "+(tab==="settings"?acA+"55":"rgba(255,255,255,0.08)"),display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
           {tab==="settings"&&<button onClick={function(e){e.stopPropagation();setTab("dashboard");}} style={{position:"absolute",right:14,width:22,height:22,borderRadius:"50%",border:"1px solid rgba(255,255,255,0.2)",background:"rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.7)",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>}
-          <span style={{fontSize:13,color:tab==="settings"?acA:"rgba(255,255,255,0.4)",fontWeight:600,letterSpacing:0.5}}>Impostazioni</span>
+          <span style={{fontSize:13,color:tab==="settings"?acA:"rgba(255,255,255,0.4)",fontWeight:600}}>Impostazioni</span>
           <span style={{fontSize:14,color:tab==="settings"?acA:"rgba(255,255,255,0.35)"}}>&#9881;</span>
         </div>
 

@@ -7,45 +7,39 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="BudgetFlow" />
-  <meta name="description" content="La tua app personale per gestire finanze, investimenti e patrimonio." />
-
+  <meta name="description" content="Gestione finanze personali, investimenti e patrimonio." />
   <title>BudgetFlow</title>
   <link rel="stylesheet" href="style.css" />
   <link rel="manifest" href="manifest.json" />
-
-  <!-- Apple touch icons -->
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png" />
-
-  <!-- Favicon -->
   <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png" />
 
-  <!-- React + ReactDOM via CDN (production builds) -->
+  <!-- React 18 + ReactDOM via CDN -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-
-  <!-- Babel standalone for JSX transform (no build step required) -->
+  <!-- Babel per transpilare JSX nel browser (nessun build step necessario) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
   <div id="root"></div>
 
-  <!-- PWA Service Worker registration -->
+  <!-- Service Worker per PWA offline -->
   <script>
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function() {
-        navigator.serviceWorker.register('/sw.js').catch(function(err) {
-          console.log('SW registration failed: ', err);
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').catch(function (e) {
+          console.warn('SW registration failed:', e);
         });
       });
     }
   </script>
 
-  <!-- Main app (JSX transpiled at runtime by Babel) -->
+  <!-- App principale -->
   <script type="text/babel" src="app.jsx" data-presets="react"></script>
 
-  <!-- Mount the app -->
+  <!-- Mount -->
   <script type="text/babel" data-presets="react">
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(React.createElement(BudgetFlow));
