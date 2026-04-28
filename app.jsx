@@ -2,7 +2,7 @@ var useState=React.useState,useEffect=React.useEffect,useRef=React.useRef,useCal
 
 var MONTHS_S = ["Gen","Feb","Mar","Apr","Mag","Giu","Lug","Ago","Set","Ott","Nov","Dic"];
 var MONTHS_F = ["Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"];
-var CURRENCIES = [{code:"EUR",symbol:"€"},{code:"USD",symbol:"$"},{code:"GBP",symbol:"£"},{code:"CHF",symbol:"Fr"},{code:"JPY",symbol:"¥"},{code:"CAD",symbol:"C$"}];
+var CURRENCIES = [{code:"EUR",symbol:"€"},{code:"USD",symbol:"$"},{code:"GBP",symbol:"£"},{code:"CHF",symbol:"Fr"}];
 
 var ICONS = {
   food:"🍔",grocery:"🛒",transport:"🚗",fuel:"⛽",health:"💊",sport:"🏋️",travel:"✈️",
@@ -58,7 +58,7 @@ var BG_COLORS = [
 
 var DEFAULT_ACCOUNTS = [
   {id:"acc1",name:"Conto Principale",icon:"🏦",color:"#4361EE",balance:0},
-  {id:"acc2",name:"Investimenti",icon:"📈",color:"#06D6A0",balance:0,type:"investment",ticker:"IWDA",yahooTicker:"IWDA.AS",isin:"IE00B4L5Y983",shares:0,buyCommission:2,annualFee:0.2},
+  {id:"acc2",name:"Investimenti",icon:"📈",color:"#06D6A0",balance:0,type:"investment",ticker:"IWDA",avTicker:"IWDA.AS",isin:"IE00B4L5Y983",shares:0,buyCommission:2,annualFee:0.2},
   {id:"acc3",name:"Fondo Pensione",icon:"🏛️",color:"#F9844A",balance:0,type:"pension",fund:"Allianz Insieme",comparto:"Linea Azionaria",shares:0,navManual:0,annualFee:0.1},
 ];
 
@@ -155,26 +155,14 @@ function BudgetFlow() {
   var [buyForm, setBuyForm] = useState(null);
   var [baseForm, setBaseForm] = useState(null);
   var [liqForm, setLiqForm] = useState(null);
-  var [priceMap, setPriceMap] = useState({});
+    var [priceMap, setPriceMap] = useState(function(){
+    try{var c=AlphaVantageService.getCachedPrices();var m={};
+    Object.keys(c).forEach(function(k){m[k]=c[k];});return m;}catch(e){return {};}
+  });
   var [priceLoading, setPriceLoading] = useState(false);
   var [priceError, setPriceError] = useState({});
   var [editTicker, setEditTicker] = useState(null);
-  // Price shortcuts for investment account (acc2)
-  var iwdaPrice = (priceMap["acc2"]||{}).price||null;
-  var iwdaChange = (priceMap["acc2"]||{}).change||null;
-  var iwdaLoading = priceLoading;
-  var iwdaError = priceError["acc2"]||false;
-  var lastFetch = (priceMap["acc2"]||{}).ts||null;
-  var [accForm, setAccForm] = useState({name:"",icon:"🏦",color:"#4361EE",balance:""});
-  var [csvMsg, setCsvMsg] = useState("");
-  var [customCats, setCustomCats] = useState([]);
-  var [showCustomCat, setShowCustomCat] = useState(false);
-  var [newCatForm, setNewCatForm] = useState({name:"",icon:"🎯",type:"expense"});
-  var [dragY, setDragY] = useState(0);
-  var modalRef = useRef();
-  var startY = useRef(0);
-  var fileRef = useRef();
-  var backupRef = useRef();
+  var [avApiKey, setAvApiKey] = useState(function(){return AlphaVantageService.readApiKey();});
   var [backupMsg, setBackupMsg] = useState("");
   var [confirmReset, setConfirmReset] = useState(false);
   var [jsonModal, setJsonModal] = useState(null);
@@ -191,43 +179,49 @@ function BudgetFlow() {
   function saveAccounts(arr) { setAccounts(arr); try{localStorage.setItem("bf_accs",JSON.stringify(arr));}catch(e){} }
 
   function fetchPriceForAcc(acc) {
-    var ticker=(acc.yahooTicker||acc.ticker||"").trim();
+    var ticker=(acc.avTicker||acc.ticker||"").trim().toUpperCase();
     if(!ticker)return;
-    var ts=new Date().toLocaleTimeString("it-IT",{hour:"2-digit",minute:"2-digit"});
-    var urls=[
-      "/api/price?ticker="+encodeURIComponent(ticker),
-      "https://query1.finance.yahoo.com/v8/finance/chart/"+encodeURIComponent(ticker)+"?interval=1d&range=2d",
-      "https://query2.finance.yahoo.com/v8/finance/chart/"+encodeURIComponent(ticker)+"?interval=1d&range=2d"
-    ];
     var aid=acc.id;
-    // Chain: try proxy → query1 → query2, stop at first success
-    fetch(urls[0]).then(function(r){if(!r.ok)throw 0;return r.json();})
-      .catch(function(){return fetch(urls[1]).then(function(r){if(!r.ok)throw 0;return r.json();});})
-      .catch(function(){return fetch(urls[2]).then(function(r){if(!r.ok)throw 0;return r.json();});})
-      .then(function(d){
-        var meta=d.chart&&d.chart.result&&d.chart.result[0]&&d.chart.result[0].meta;
-        if(!meta||!meta.regularMarketPrice)throw 0;
-        var price=meta.regularMarketPrice;
-        var prev=meta.chartPreviousClose||meta.previousClose||price;
-        setPriceMap(function(m){return Object.assign({},m,{[aid]:{price:price,change:prev?((price-prev)/prev*100):null,ts:ts,ticker:ticker}});});
-        setPriceError(function(e){return Object.assign({},e,{[aid]:false});});
+    setPriceLoading(true);
+    AlphaVantageService.getPrice(ticker)
+      .then(function(data){
+        setPriceMap(function(m){return Object.assign({},m,{[aid]:data});});
+        setPriceError(function(e){return Object.assign({},e,{[aid]:data.fromCache?"cache":false});});
         setPriceLoading(false);
       })
-      .catch(function(){
-        setPriceError(function(e){return Object.assign({},e,{[aid]:true});});
+      .catch(function(err){
+        setPriceError(function(e){return Object.assign({},e,{[aid]:err.message||String(err)});});
         setPriceLoading(false);
       });
   }
 
-  function fetchIwdaPrice(){
+  function fetchAllPrices(){
+    var invAccs=accounts.filter(function(a){return a.type==="investment"&&(a.avTicker||a.ticker);});
+    if(!invAccs.length)return;
     setPriceLoading(true);
-    accounts.filter(function(a){return a.type==="investment";}).forEach(function(a){fetchPriceForAcc(a);});
+    var tickers=invAccs.map(function(a){return (a.avTicker||a.ticker).trim().toUpperCase();});
+    AlphaVantageService.refreshIfStale(tickers)
+      .then(function(results){
+        setPriceMap(function(m){
+          var next=Object.assign({},m);
+          invAccs.forEach(function(a){
+            var t=(a.avTicker||a.ticker).trim().toUpperCase();
+            if(results[t])next[a.id]=results[t];
+          });
+          return next;
+        });
+        setPriceLoading(false);
+      })
+      .catch(function(){setPriceLoading(false);});
   }
+
+  // Backward compat alias
+  var fetchIwdaPrice=fetchAllPrices;
 
   useEffect(function(){
     if(accounts.some(function(a){return a.type==="investment";})){
-      fetchIwdaPrice();
-      var iv=setInterval(fetchIwdaPrice,5*60*1000);
+      fetchAllPrices();
+      var iv=setInterval(fetchAllPrices,AlphaVantageService.INTERVAL_MS);
       return function(){clearInterval(iv);};
     }
   },[]);
@@ -621,7 +615,7 @@ return new Date().toISOString().split("T")[0];
               accounts.forEach(function(acc){
                 var at=txs.filter(function(t){return t.account===acc.id||t.toAccount===acc.id;});
                 var b=at.reduce(function(s,t){if(t.type==="income"&&t.account===acc.id)return s+t.amount;if(t.type==="expense"&&t.account===acc.id)return s-t.amount;if(t.type==="transfer"&&t.toAccount===acc.id)return s+t.amount;if(t.type==="transfer"&&t.account===acc.id)return s-t.amount;return s;},acc.balance);
-                if(acc.type==="investment"){var txI=at.filter(function(t){return t.toAccount===acc.id&&t.type==="transfer";}).reduce(function(s,t){return s+t.amount;},0);var v=txI+(acc.balance||0)+(acc.baseInvested||0);var pm2=priceMap[acc.id]&&priceMap[acc.id].price;var m=pm2&&acc.shares?acc.shares*pm2+(acc.balance||0):acc.baseInvested?(acc.baseInvested+(acc.basePnl||0)):v;ti+=v;tp+=m-v;}
+                if(acc.type==="investment"){var txI=at.filter(function(t){return t.toAccount===acc.id&&t.type==="transfer";}).reduce(function(s,t){return s+t.amount;},0);var v=txI+(acc.balance||0)+(acc.baseInvested||0);var pm3=(priceMap[acc.id]||{}).price;var m=pm3&&acc.shares?acc.shares*pm3+(acc.balance||0):acc.baseInvested?(acc.baseInvested+(acc.basePnl||0)):v;ti+=v;tp+=m-v;}
                 else if(acc.type==="pension"){var txP2=at.filter(function(t){return t.toAccount===acc.id&&t.type==="transfer";}).reduce(function(s,t){return s+t.amount;},0);var v2=txP2+(acc.balance||0)+(acc.baseInvested||0);var m2=acc.shares&&acc.navManual?acc.shares*acc.navManual+(acc.balance||0):acc.baseInvested?(acc.baseInvested+(acc.basePnl||0)):v2;ti+=v2;tp+=m2-v2;}
                 else{ti+=b;}
               });
@@ -722,29 +716,37 @@ return new Date().toISOString().split("T")[0];
                               <div style={{fontSize:13,fontWeight:800,color:acc.color}}>{mktVal!==null?fmt(mktVal):"---"}</div>
                             </div>
                           </div>
-                          {(function(){var pd=priceMap[acc.id]||{};var perr=priceError[acc.id]||false;var yticker=acc.yahooTicker||acc.ticker||"";return (
+                          {(function(){var pd=priceMap[acc.id]||{};var perr=priceError[acc.id];var avt=acc.avTicker||acc.ticker||"";var noKey=!AlphaVantageService.readApiKey();return (
                               <div style={{background:"rgba(255,255,255,0.04)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
                                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                                   <div style={{flex:1}}>
                                     <div style={{fontSize:9,color:"rgba(255,255,255,0.4)",marginBottom:3,display:"flex",gap:5}}>
-                                      <span>Ticker Yahoo:</span>
+                                      <span>Ticker:</span>
                                       {editTicker===acc.id?(
-                                        <input autoFocus defaultValue={yticker} placeholder="es. IWDA.AS" onBlur={function(e){var t=e.target.value.trim();if(t){var na=accounts.map(function(a){return a.id===acc.id?Object.assign({},a,{yahooTicker:t}):a;});saveAccounts(na);setPriceLoading(true);fetchPriceForAcc(Object.assign({},acc,{yahooTicker:t}));}setEditTicker(null);}} onKeyDown={function(e){if(e.key==="Enter")e.target.blur();}} style={{background:"rgba(255,255,255,0.12)",border:"1px solid "+acA,borderRadius:6,color:"#fff",padding:"2px 8px",fontSize:11,outline:"none",width:110}}/>
+                                        <input autoFocus defaultValue={avt} placeholder="es. IWDA.AS" onBlur={function(e){var t=e.target.value.trim();if(t){var na=accounts.map(function(a){return a.id===acc.id?Object.assign({},a,{avTicker:t}):a;});saveAccounts(na);fetchPriceForAcc(Object.assign({},acc,{avTicker:t}));}setEditTicker(null);}} onKeyDown={function(e){if(e.key==="Enter")e.target.blur();}} style={{background:"rgba(255,255,255,0.12)",border:"1px solid "+acA,borderRadius:6,color:"#fff",padding:"2px 8px",fontSize:11,outline:"none",width:110}}/>
                                       ):(
-                                        <span onClick={function(e){e.stopPropagation();setEditTicker(acc.id);}} style={{color:acA,fontWeight:700,cursor:"pointer"}}>{yticker||"—"} <span style={{opacity:0.5}}>✏</span></span>
+                                        <span onClick={function(e){e.stopPropagation();setEditTicker(acc.id);}} style={{color:acA,fontWeight:700,cursor:"pointer"}}>{avt||"—"} <span style={{opacity:0.5}}>✏</span></span>
                                       )}
                                     </div>
-                                    {perr?(
-                                      <div style={{fontSize:11,color:"#FF416C",fontWeight:600}}>❌ Non disponibile · <span style={{fontWeight:400}}>Verifica ticker Yahoo (es. IWDA.AS)</span></div>
+                                    {noKey?(
+                                      <div style={{fontSize:11,color:"#FFD60A",fontWeight:600}}>⚠ Imposta API Key in Impostazioni</div>
+                                    ):perr&&perr!=="cache"?(
+                                      <div>
+                                        <div style={{fontSize:11,color:"#FF416C",fontWeight:600}}>❌ {typeof perr==="string"?perr:"Errore"}</div>
+                                        {pd.price&&<div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginTop:2}}>Ultimo noto: €{pd.price.toFixed(2)}</div>}
+                                      </div>
                                     ):(
-                                      <div style={{display:"flex",alignItems:"baseline",gap:8}}>
-                                        <div style={{fontSize:18,fontWeight:800,color:"#fff"}}>{pd.price?"€"+pd.price.toFixed(2):"---"}</div>
-                                        {pd.change!=null&&<div style={{fontSize:11,fontWeight:700,color:pd.change>=0?"#06D6A0":"#FF416C"}}>{pd.change>=0?"+":""}{pd.change.toFixed(2)}%</div>}
+                                      <div>
+                                        <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                                          <div style={{fontSize:18,fontWeight:800,color:"#fff"}}>{pd.price?"€"+pd.price.toFixed(2):"---"}</div>
+                                          {pd.change!=null&&<div style={{fontSize:11,fontWeight:700,color:pd.change>=0?"#06D6A0":"#FF416C"}}>{pd.change>=0?"+":""}{pd.change.toFixed(2)}%</div>}
+                                        </div>
+                                        {pd.fromCache&&<div style={{fontSize:9,color:"rgba(255,255,255,0.35)"}}>📦 Cache · aggiorna con 🔄</div>}
                                       </div>
                                     )}
                                     {pd.ts&&<div style={{fontSize:9,color:"rgba(255,255,255,0.25)"}}>⏱ {pd.ts}</div>}
                                   </div>
-                                  <button onClick={function(e){e.stopPropagation();setPriceLoading(true);fetchPriceForAcc(acc);}} style={{padding:"6px 10px",borderRadius:9,border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",fontSize:12,background:"transparent",color:"rgba(255,255,255,0.6)",flexShrink:0,marginLeft:8}}>{priceLoading?"⏳":"🔄"}</button>
+                                  <button onClick={function(e){e.stopPropagation();fetchPriceForAcc(acc);}} style={{padding:"6px 10px",borderRadius:9,border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",fontSize:12,background:"transparent",color:"rgba(255,255,255,0.6)",flexShrink:0,marginLeft:8}}>{priceLoading?"⏳":"🔄"}</button>
                                 </div>
                               </div>
                             );})()}
@@ -762,7 +764,7 @@ return new Date().toISOString().split("T")[0];
                             </div>
                           </div>
                           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-                            <button onClick={function(e){e.stopPropagation();setBuyForm(buyForm&&buyForm.id===acc.id?null:{id:acc.id,type:"investment",qty:"",price:(priceMap[acc.id]&&priceMap[acc.id].price)?priceMap[acc.id].price.toFixed(2):"",comm:String(acc.buyCommission||2),ter:String(acc.annualFee||0.2)});setBaseForm(null);setLiqForm(null);}} style={{padding:"8px 13px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,background:"linear-gradient(135deg,#06D6A0,#00a07a)",color:"#000"}}>+ Acquisto quote</button>
+                            <button onClick={function(e){e.stopPropagation();setBuyForm(buyForm&&buyForm.id===acc.id?null:{id:acc.id,type:"investment",qty:"",price:(priceMap[acc.id]&&priceMap[acc.id].price)?(priceMap[acc.id].price).toFixed(2):"",comm:String(acc.buyCommission||2),ter:String(acc.annualFee||0.2)});setBaseForm(null);setLiqForm(null);}} style={{padding:"8px 13px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,background:"linear-gradient(135deg,#06D6A0,#00a07a)",color:"#000"}}>+ Acquisto quote</button>
                             <button onClick={function(e){e.stopPropagation();setBaseForm(baseForm&&baseForm.id===acc.id?null:{id:acc.id,type:"investment",invested:String(acc.baseInvested||""),pnl:String(acc.basePnl||"")});setBuyForm(null);setLiqForm(null);}} style={outBtn}>📊 Base storica</button>
                             <button onClick={function(e){e.stopPropagation();setLiqForm(liqForm&&liqForm.id===acc.id?null:{id:acc.id,val:String(acc.balance||"")});setBuyForm(null);setBaseForm(null);}} style={outBtn}>💰 Liquidità</button>
                           </div>
@@ -1109,6 +1111,16 @@ return new Date().toISOString().split("T")[0];
                   return <button key={c.code} onClick={function(){saveSett(Object.assign({},settings,{currency:c.code}));}} style={{padding:"7px 14px",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:600,border:"1px solid "+(active?acA:"rgba(255,255,255,0.12)"),background:active?acA+"22":"transparent",color:active?acA:"rgba(255,255,255,0.5)"}}>{c.symbol} {c.code}</button>;
                 })}
               </div>
+            </div>
+
+            <div style={{...cs,marginBottom:14}}>
+              <div style={sHdr}>Alpha Vantage API Key</div>
+              <div style={{fontSize:11,color:"rgba(255,255,255,0.4)",marginBottom:8}}>Prezzi live ETF. Gratuito su <span style={{color:acA,fontWeight:600}}>alphavantage.co</span> (500 req/giorno, 5/min).</div>
+              <div style={{display:"flex",gap:8}}>
+                <input type="text" placeholder="Incolla qui la tua API key" defaultValue={avApiKey} id="av-key-input" style={{...inp,flex:1,fontSize:12,fontFamily:"monospace"}}/>
+                <button onClick={function(){var v=document.getElementById("av-key-input").value.trim();AlphaVantageService.saveApiKey(v);setAvApiKey(v);if(v)fetchAllPrices();}} style={{padding:"0 14px",borderRadius:12,border:"none",cursor:"pointer",background:"linear-gradient(135deg,"+acA+","+acB+")",color:"#fff",fontSize:13,fontWeight:700,flexShrink:0}}>Salva</button>
+              </div>
+              {avApiKey&&<div style={{marginTop:6,fontSize:10,color:"rgba(255,255,255,0.35)"}}>✓ Key attiva · aggiornamento ogni 15 min</div>}
             </div>
 
             <div style={{...cs,marginBottom:14}}>

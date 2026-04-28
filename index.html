@@ -19,7 +19,7 @@
   <!-- React 18 + ReactDOM via CDN -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel per transpilare JSX nel browser (nessun build step necessario) -->
+  <!-- Babel per transpilare JSX nel browser -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
@@ -36,10 +36,13 @@
     }
   </script>
 
-  <!-- App principale -->
+  <!-- Alpha Vantage Service (caricato prima dell'app, plain JS) -->
+  <script src="alphaVantageService.js"></script>
+
+  <!-- App principale (JSX transpilato da Babel nel browser) -->
   <script type="text/babel" src="app.jsx" data-presets="react"></script>
 
-  <!-- Mount -->
+  <!-- Mount React -->
   <script type="text/babel" data-presets="react">
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(React.createElement(BudgetFlow));

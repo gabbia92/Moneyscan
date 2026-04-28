@@ -13,13 +13,14 @@
       "dest": "/app.jsx"
     },
     {
+      "src": "/alphaVantageService.js",
+      "headers": { "Content-Type": "application/javascript", "Cache-Control": "public, max-age=3600" },
+      "dest": "/alphaVantageService.js"
+    },
+    {
       "src": "/manifest.json",
       "headers": { "Content-Type": "application/manifest+json" },
       "dest": "/manifest.json"
-    },
-    {
-      "src": "/api/price",
-      "dest": "/api/price.js"
     },
     {
       "src": "/(.*)",
